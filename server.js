@@ -1,7 +1,15 @@
 const express = require('express');
 const app = express();
 app.use(express.json());
+// Add this at the top, before other routes
+app.get('/', (req, res) => {
+    res.send('✅ M-Pesa backend is running!');
+});
 
+// Also add a test endpoint
+app.get('/test', (req, res) => {
+    res.json({ status: 'ok', message: 'Server is working' });
+});
 const INTASEND_API_URL = "https://sandbox.intasend.com/api/v1/";
 const INTASEND_SECRET_KEY = "ISPubKey_test_397772e9-4a7b-4646-a7c3-9f8f7bf2e39b"; // ← Replace with your key
 
