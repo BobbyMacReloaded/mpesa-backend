@@ -1,23 +1,24 @@
 const express = require('express');
 const app = express();
 app.use(express.json());
-// Add this at the top, before other routes
+
+// Store payment statuses in memory (use database in production)
+const payments = {};
+
 app.get('/', (req, res) => {
     res.send('✅ M-Pesa backend is running!');
 });
 
-// Also add a test endpoint
 app.get('/test', (req, res) => {
     res.json({ status: 'ok', message: 'Server is working' });
 });
-const INTASEND_API_URL = "https://sandbox.intasend.com/api/v1/";
-const INTASEND_SECRET_KEY = "ISSecretKey_test_ee130c89-0a4f-43e3-b8f2-017f00dc8117"; // ← Replace with your key
 
-// Endpoint your Android app will call
+const INTASEND_API_URL = "https://sandbox.intasend.com/api/v1/";
+const INTASEND_SECRET_KEY = "ISSecretKey_test_ee130c89-0a4f-43e3-b8f2-017f00dc8117";
+
 app.post('/initiate-payment', async (req, res) => {
     const { phone, amount, orderId } = req.body;
     
-    // Format phone number (07XX → 2547XX)
     let formattedPhone = phone.replace(/[^0-9]/g, '');
     if (formattedPhone.startsWith('0')) {
         formattedPhone = '254' + formattedPhone.substring(1);
@@ -45,6 +46,14 @@ app.post('/initiate-payment', async (req, res) => {
 
         const data = await response.json();
         console.log("IntaSend response:", data);
+        
+        // Store payment status
+        payments[orderId] = {
+            tracking_id: data.tracking_id,
+            status: 'pending',
+            initiated_at: new Date().toISOString()
+        };
+        
         res.json(data);
     } catch (error) {
         console.error("Error:", error);
@@ -52,16 +61,37 @@ app.post('/initiate-payment', async (req, res) => {
     }
 });
 
-// Callback endpoint where IntaSend sends payment results
 app.post('/payment-callback', (req, res) => {
     const { invoice } = req.body;
     console.log("Payment callback received:", invoice);
     
-    // invoice.state will be "COMPLETE" or "FAILED"
-    // invoice.api_ref is your orderId
-    // TODO: Update your Supabase orders table here
+    if (invoice && invoice.api_ref) {
+        payments[invoice.api_ref] = {
+            ...payments[invoice.api_ref],
+            status: invoice.state === 'COMPLETE' ? 'success' : 'failed',
+            mpesa_receipt: invoice.mpesa_receipt_code,
+            completed_at: new Date().toISOString()
+        };
+    }
     
     res.json({ status: 'ok' });
+});
+
+// Add this endpoint for Android to check payment status
+app.get('/payment-status/:orderId', (req, res) => {
+    const { orderId } = req.params;
+    const payment = payments[orderId];
+    
+    if (payment) {
+        res.json({ 
+            orderId: orderId,
+            status: payment.status,
+            tracking_id: payment.tracking_id,
+            mpesa_receipt: payment.mpesa_receipt
+        });
+    } else {
+        res.json({ orderId: orderId, status: 'pending' });
+    }
 });
 
 app.listen(3000, () => {
